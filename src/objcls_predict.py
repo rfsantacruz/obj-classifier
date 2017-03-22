@@ -17,12 +17,12 @@ def prediction(weights_path, imgs_path, show):
     :param show: Plot visualization
     :return: list of predictions
     """
-    classes = re.search(".*\.CLS_(.+?)\..*", weights_path).group(1)
-    classes = classes.split('-')
+    ebase_cnn, classes = objcls_model.read_model_str(weights_path)
+    print("Model: Base model={}, Classes={}".format(ebase_cnn.name, classes))
 
     # Load trained model
-    model, _ = objcls_model.vgg_based_model(len(classes), input_shape=(150, 150, 3))
-    model.load_weights(weights_path)
+    model_builder = objcls_model.CNNModelBuilder(ebase_cnn, len(classes), input_shape=(150, 150, 3), weights=weights_path)
+    model = model_builder.inference_model()
 
     # read image, pre-process and predict
     print("Model prediction")

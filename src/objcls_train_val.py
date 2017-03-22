@@ -1,24 +1,23 @@
 # 20/02/2017, Rodrigo Santa Cruz
 # Training and validation script
 
-from keras.optimizers import SGD
 from keras.preprocessing.image import ImageDataGenerator
 from keras.callbacks import TensorBoard, ModelCheckpoint
 import objcls_model
 import os
 
 
-def train_eval(data_dir, classes, output_dir, samples_per_epoch, nb_val_samples, nb_epoch, bottleneck_epochs,
+def train_eval(base_model_str, data_dir, classes, output_dir, samples_per_epoch, nb_val_samples, nb_epoch,
                snapshot_interval):
     """
     CNN classifier train and validation script
+    :param base_model_str: String name of architecture to use as base model
     :param data_dir: Directory with train/classes and validation/classes folders
     :param classes: list of classes. If [] use all subdirectories of data_dir/train in the alphabetical order
     :param output_dir: directory to save logs and models
     :param samples_per_epoch: num of samples per epoch
     :param nb_val_samples: number of samples for validation
     :param nb_epoch: number of epochs
-    :param bottleneck_epochs: number bottleneck epochs
     :param snapshot_interval: interval to snapshot models
     :return: Return trained model
     """
@@ -27,7 +26,6 @@ def train_eval(data_dir, classes, output_dir, samples_per_epoch, nb_val_samples,
         for file in sorted(os.listdir(os.path.join(data_dir, 'train'))):
             if os.path.isdir(os.path.join(data_dir, 'train', file)):
                 classes.append(file)
-    cls_string = '-'.join(classes)
     print("Classifier for classes: {}".format(classes))
 
     train_datagen = ImageDataGenerator(
@@ -56,39 +54,17 @@ def train_eval(data_dir, classes, output_dir, samples_per_epoch, nb_val_samples,
     os.makedirs(output_dir)
 
     # Create Model
-    model, base_model = objcls_model.vgg_based_model(len(classes), input_shape=(150, 150, 3))
+    model_builder = objcls_model.CNNModelBuilder(objcls_model.EBaseCNN[base_model_str], len(classes), input_shape=(150, 150, 3))
+    model = model_builder.learning_model()
 
-    # train only the top layers (which were randomly initialized)
-    if bottleneck_epochs > 0:
-        print("Training Classifier...")
-        logs_cls_dir = os.path.join(output_dir, 'cls_train_val')
-        os.mkdir(logs_cls_dir)
-        for layer in base_model.layers:
-            layer.trainable = False
-
-        model.compile(optimizer='rmsprop', loss='categorical_crossentropy',
-                      metrics=['accuracy', 'precision', 'recall', 'fmeasure'])
-        callbacks = [TensorBoard(log_dir=logs_cls_dir, write_graph=False),
-                     ModelCheckpoint(os.path.join(logs_cls_dir,
-                                                  "clstrain_weights.CLS_" + cls_string + ".E_{epoch:02d}-VACC_{val_acc:.2f}.hdf5"),
-                                     save_weights_only=True, period=snapshot_interval)]
-        model.fit_generator(train_generator, samples_per_epoch=samples_per_epoch, nb_epoch=bottleneck_epochs,
-                            validation_data=validation_generator,
-                            nb_val_samples=nb_val_samples,
-                            callbacks=callbacks)
-
-    # train the whole net
-    print("Finetune all layers...")
-    logs_ft_dir = os.path.join(output_dir, 'ft_train_val')
-    os.mkdir(logs_ft_dir)
-    for layer in model.layers:
-        layer.trainable = True
-    model.compile(optimizer=SGD(lr=0.0001, momentum=0.9), loss='binary_crossentropy',
-                  metrics=['accuracy', 'precision', 'recall', 'fmeasure'])
-    callbacks = [TensorBoard(log_dir=logs_ft_dir, write_graph=False),
+    # Train and validate the network
+    print("Finetune model")
+    callbacks = [TensorBoard(log_dir=output_dir, write_graph=False),
                  ModelCheckpoint(
-                         os.path.join(logs_ft_dir,
-                                      "finetune_weights.CLS_" + cls_string + ".E_{epoch:02d}-VACC_{val_acc:.2f}.hdf5"),
+                         os.path.join(output_dir,
+                                      "finetune_weights" + objcls_model.write_model_str(
+                                              objcls_model.EBaseCNN[base_model_str],
+                                              classes) + ".E_{epoch:02d}-VACC_{val_acc:.2f}.hdf5"),
                          save_weights_only=True, period=snapshot_interval)]
     model.fit_generator(train_generator, samples_per_epoch=samples_per_epoch, nb_epoch=nb_epoch,
                         validation_data=validation_generator,
@@ -103,14 +79,13 @@ if __name__ == "__main__":
 
     # Parse command line arguments
     parser = argparse.ArgumentParser(prog="CNN Classifier training and Validation")
+    parser.add_argument("base_model", type=str, choices=[ecnn.name for ecnn in list(objcls_model.EBaseCNN)],
+                        help="Base architecture to use")
     parser.add_argument("data_dir", type=str, help="Data directory for train and validation")
     parser.add_argument("output_dir", type=str, help="Output directory for logs and snapshots")
     parser.add_argument("-train_samples", type=int, default=2000, help="Number of samples per epoch")
     parser.add_argument("-val_samples", type=int, default=800, help="Number of samples for validation")
     parser.add_argument("-epochs", type=int, default=50, help="Number of epochs")
-    parser.add_argument("-bottleneck", type=int, default=0,
-                        help="Number of epochs for bottleneck training. "
-                             "If not passed, not bottleneck training is performed ")
     parser.add_argument("-snap_intv", type=int, default=10, help="Model snapshot interval")
     parser.add_argument("-classes", type=str, nargs='*', default=[],
                         help="Classes to learn a classifier. They should be subdirectories of train and validation "
@@ -119,6 +94,6 @@ if __name__ == "__main__":
     print(args)
 
     # Run train and validation script
-    train_eval(args.data_dir, args.classes, args.output_dir, args.train_samples, args.val_samples, args.epochs,
-               args.bottleneck,
+    train_eval(args.base_model, args.data_dir, args.classes, args.output_dir, args.train_samples, args.val_samples,
+               args.epochs,
                args.snap_intv)
